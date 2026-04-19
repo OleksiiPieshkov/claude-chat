@@ -324,6 +324,37 @@ header {
 }
 #sendBtn:disabled { opacity: 0.3; cursor: not-allowed; }
 #sendBtn:active:not(:disabled) { opacity: 0.7; }
+
+/* ATTACH */
+.btn-attach {
+  background: transparent; border: 1px solid var(--border);
+  border-radius: 6px; color: var(--muted);
+  font-size: 18px; width: 40px; height: 40px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: all 0.15s;
+}
+.btn-attach:active { border-color: var(--accent2); color: var(--accent2); }
+
+#attachPreview {
+  display: none; align-items: center; gap: 8px;
+  padding: 6px 0 2px;
+}
+#attachPreview.show { display: flex; }
+#attachThumb {
+  width: 40px; height: 40px; object-fit: cover;
+  border-radius: 4px; border: 1px solid var(--border);
+}
+#attachName {
+  flex: 1; font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; color: var(--accent2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#attachClear {
+  background: transparent; border: none; color: var(--muted);
+  font-size: 16px; cursor: pointer; padding: 2px 6px;
+}
+#attachClear:active { color: var(--red); }
+
 .input-hint { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--muted); margin-top: 5px; }
 
 /* TOAST */
@@ -433,7 +464,17 @@ header {
     </div>
 
     <div class="input-zone">
+      <div id="attachPreview">
+        <img id="attachThumb" src="" alt="">
+        <span id="attachName"></span>
+        <button id="attachClear" onclick="clearAttach()">✕</button>
+      </div>
       <div class="input-row">
+        <label class="btn-attach" title="Прикрепить файл">
+          📎
+          <input type="file" id="fileInput" accept="image/*,application/pdf"
+            style="display:none" onchange="handleFile(event)">
+        </label>
         <textarea id="userInput" placeholder="Сообщение…" rows="1"></textarea>
         <button id="sendBtn" onclick="sendMsg()">↑</button>
       </div>
@@ -736,6 +777,56 @@ function showTyping() {
 }
 function removeTyping() { const t = document.getElementById('typing'); if (t) t.remove(); }
 
+
+// ════════════════════════════════════════
+//  FILE ATTACHMENT
+// ════════════════════════════════════════
+let attachedFile = null; // {type, data, mediaType, name}
+
+function handleFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const maxMB = 5;
+  if (file.size > maxMB * 1024 * 1024) {
+    showToast('Файл слишком большой (макс ' + maxMB + ' MB)');
+    e.target.value = '';
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const dataUrl = ev.target.result;
+    const base64  = dataUrl.split(',')[1];
+    const mime    = file.type || 'application/octet-stream';
+
+    attachedFile = { data: base64, mediaType: mime, name: file.name };
+
+    // Show preview
+    const preview = document.getElementById('attachPreview');
+    const thumb   = document.getElementById('attachThumb');
+    const nameEl  = document.getElementById('attachName');
+
+    if (mime.startsWith('image/')) {
+      thumb.src = dataUrl;
+      thumb.style.display = 'block';
+    } else {
+      thumb.style.display = 'none';
+    }
+    nameEl.textContent = file.name;
+    preview.classList.add('show');
+    showToast('Файл прикреплён: ' + file.name);
+  };
+  reader.readAsDataURL(file);
+  e.target.value = '';
+}
+
+function clearAttach() {
+  attachedFile = null;
+  document.getElementById('attachPreview').classList.remove('show');
+  document.getElementById('attachThumb').src = '';
+}
+
 // ════════════════════════════════════════
 //  SEND
 // ════════════════════════════════════════
@@ -751,8 +842,21 @@ async function sendMsg() {
   document.getElementById('sendBtn').disabled = true;
   inp.value = ''; inp.style.height = 'auto';
 
-  addMsgDOM('user', text);
-  history.push({ role: 'user', content: text });
+  // Build user message content
+  let userContent;
+  if (attachedFile) {
+    const fileBlock = attachedFile.mediaType.startsWith('image/')
+      ? { type: 'image', source: { type: 'base64', media_type: attachedFile.mediaType, data: attachedFile.data } }
+      : { type: 'document', source: { type: 'base64', media_type: attachedFile.mediaType, data: attachedFile.data } };
+    userContent = [ fileBlock, { type: 'text', text: text || 'Что это?' } ];
+  } else {
+    userContent = text;
+  }
+
+  const displayText = text + (attachedFile ? ' 📎 ' + attachedFile.name : '');
+  addMsgDOM('user', displayText);
+  history.push({ role: 'user', content: userContent });
+  clearAttach();
   updateMsgCount();
   showTyping();
 
